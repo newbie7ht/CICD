@@ -1,0 +1,81 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  DOCKER_IMAGE: custom-image-${{ github.run_id }}
+  DOCKER_TAG: latest
+  ARTIFACTORY_URL: https://your-artifactory-url
+  ARTIFACTORY_REPO: your-docker-repo
+  KUBECONFIG: ${{ secrets.KUBECONFIG }}
+
+jobs:
+  checkout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+      - name: Build with Maven
+        run: mvn clean install
+
+  sonarqube:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SonarQube Scan
+        uses: SonarSource/sonarcloud-github-action@v1
+        with:
+          args: >
+            -Dsonar.projectKey=your_project_key
+            -Dsonar.organization=your_organization
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build Docker image
+        run: docker build -t ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }} .
+
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+
+      - name: Push to JFrog Artifactory
+        run: |
+          echo ${{ secrets.ARTIFACTORY_PASSWORD }} | docker login ${{ env.ARTIFACTORY_URL }} --username ${{ secrets.ARTIFACTORY_USERNAME }} --password-stdin
+          docker push ${{ env.ARTIFACTORY_URL }}/${{ env.ARTIFACTORY_REPO }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl set image deployment/your-deployment-name your-container-name=${{ env.ARTIFACTORY_URL }}/${{ env.ARTIFACTORY_REPO }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }} -n your-namespace
+          kubectl rollout status deployment/your-deployment-name -n your-namespace

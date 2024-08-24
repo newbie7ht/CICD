@@ -1,0 +1,58 @@
+stages:
+  - checkout
+  - build
+  - test
+  - docker
+  - deploy
+
+variables:
+  DOCKER_IMAGE: "custom-image-$CI_PIPELINE_IID"
+  DOCKER_TAG: "latest"
+  ARTIFACTORY_URL: "https://your-artifactory-url"
+  ARTIFACTORY_REPO: "your-docker-repo"
+  KUBECONFIG_FILE: "$CI_PROJECT_DIR/kubeconfig"
+
+before_script:
+  - export PATH=$PATH:$CI_PROJECT_DIR/sonar-scanner/bin
+  - export KUBECONFIG=$KUBECONFIG_FILE
+
+checkout:
+  stage: checkout
+  script:
+    - git checkout $CI_COMMIT_REF_NAME
+
+build:
+  stage: build
+  script:
+    - mvn clean install
+
+sonarqube:
+  stage: test
+  image: sonarsource/sonar-scanner-cli:latest
+  script:
+    - sonar-scanner
+
+docker_build:
+  stage: docker
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t $DOCKER_IMAGE:$DOCKER_TAG .
+    - trivy image $DOCKER_IMAGE:$DOCKER_TAG
+
+push_to_artifactory:
+  stage: docker
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker login $ARTIFACTORY_URL --username "$CI_REGISTRY_USER" --password "$CI_REGISTRY_PASSWORD"
+    - docker push $ARTIFACTORY_URL/$ARTIFACTORY_REPO/$DOCKER_IMAGE:$DOCKER_TAG
+
+deploy_to_k8s:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - kubectl set image deployment/your-deployment-name your-container-name=$ARTIFACTORY_URL/$ARTIFACTORY_REPO/$DOCKER_IMAGE:$DOCKER_TAG -n your-namespace
+    - kubectl rollout status deployment/your-deployment-name -n your-namespace
