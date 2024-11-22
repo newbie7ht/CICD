@@ -1,0 +1,41 @@
+pipeline {
+    agent any
+    stages {
+        stage('Load Configuration') {
+            steps {
+                script {
+                    // Read the .code-scan-config.yaml file
+                    def config = readYaml file: '.code-scan-config.yaml'
+
+                    // Print configuration values (for debugging)
+                    echo "Repository URL: ${config.repo_url}"
+                    echo "Branch to scan: ${config.branch}"
+                    echo "Scan Type: ${config.scan_type}"
+
+                    // Save config for use in later stages
+                    env.REPO_URL = config.repo_url
+                    env.BRANCH = config.branch
+                    env.SCAN_TYPE = config.scan_type
+                }
+            }
+        }
+        stage('Clone Repository') {
+            steps {
+                script {
+                    checkout([$class: 'GitSCM', branches: [[name: env.BRANCH]], userRemoteConfigs: [[url: env.REPO_URL]]])
+                }
+            }
+        }
+        stage('Code Scanning') {
+            steps {
+                script {
+                    if (env.SCAN_TYPE == 'SonarQube') {
+                        sh "sonar-scanner -Dsonar.projectKey=${config.sonarqube.project_key} -Dsonar.sources=${config.sonarqube.source_dir} -Dsonar.host.url=http://sonarqube-server:9000"
+                    } else if (env.SCAN_TYPE == 'Checkmarx') {
+                        sh "checkmarx-cli scan --project-name ${config.checkmarx.project_name} --source-dir ${config.checkmarx.source_dir}"
+                    }
+                }
+            }
+        }
+    }
+}

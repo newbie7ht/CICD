@@ -1,0 +1,16 @@
+# .code-scan-config.yaml
+repo_url: https://github.com/my-org/my-repo.git
+branch: main
+scan_type: SonarQube
+sonarqube:
+  project_key: my-project
+  source_dir: src
+checkmarx:
+  project_name: my-project
+  source_dir: src
+scan_type: Trivy
+trivy:
+  scan_level: critical
+  exclude_dirs:
+    - node_modules
+    - vendor
